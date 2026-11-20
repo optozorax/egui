@@ -93,6 +93,19 @@ impl Drop for GlowWinitRunning<'_> {
 /// * Microsoft Windows: requires that we create a window before opengl context.
 /// * Android: window and surface should be destroyed when we receive a suspend event. recreate on resume event.
 ///
+/// Has 10 or more bits per color channel (`NativeOptions::prefer_10_bit_color`).
+fn is_10_bit(config: &glutin::config::Config) -> bool {
+    use glutin::config::{ColorBufferType, GlConfig as _};
+    matches!(
+        config.color_buffer_type(),
+        Some(ColorBufferType::Rgb {
+            r_size: 10..,
+            g_size: 10..,
+            b_size: 10..
+        })
+    )
+}
+
 /// winit guarantees that we will get a Resumed event on startup on all platforms.
 /// * Before Resumed event: `gl_config`, `gl_context` can be created at any time. on windows, a window must be created to get `gl_context`.
 /// * Resumed: `gl_surface` will be created here. `window` will be re-created here for android.
@@ -298,7 +311,7 @@ impl<'app> GlowWinitApp<'app> {
             gl,
             "",
             native_options.glow_options.shader_version,
-            native_options.dithering,
+            native_options.dithering && !is_10_bit(&glutin_window_context.gl_config),
         )?;
 
         Ok((glutin_window_context, painter))
@@ -1210,6 +1223,12 @@ impl GlutinWindowContext {
             .with_depth_size(native_options.depth_buffer)
             .with_stencil_size(native_options.stencil_buffer)
             .with_transparency(native_options.viewport.transparent.unwrap_or(false));
+        // 10-bit configs have 2 or 0 bits of alpha; the default template asks for at least 8.
+        let config_template_builder = if native_options.prefer_10_bit_color {
+            config_template_builder.with_alpha_size(0)
+        } else {
+            config_template_builder
+        };
         // we don't know if multi sampling option is set. so, check if its more than 0.
         let config_template_builder = if native_options.multisampling > 0 {
             config_template_builder.with_multisampling(
@@ -1243,10 +1262,27 @@ impl GlutinWindowContext {
                 .build(
                     event_loop,
                     config_template_builder.clone(),
-                    |mut config_iterator| {
-                        let config = config_iterator.next().expect(
-                            "failed to find a matching configuration for creating glutin config",
-                        );
+                    |config_iterator| {
+                        use glutin::config::GlConfig as _;
+                        let configs: Vec<_> = config_iterator.collect();
+                        // The config we would take without `prefer_10_bit_color`: the first one
+                        // with the default 8-bit alpha (the template asks for less only when a
+                        // 10-bit config is preferred).
+                        let usual = configs
+                            .iter()
+                            .find(|c| c.alpha_size() >= 8)
+                            .or_else(|| configs.first())
+                            .expect(
+                                "failed to find a matching configuration for creating glutin config",
+                            );
+                        let ten_bit = configs.iter().find(|c| {
+                            native_options.prefer_10_bit_color
+                                && is_10_bit(c)
+                                && c.num_samples() == usual.num_samples()
+                                && c.depth_size() >= usual.depth_size()
+                                && c.stencil_size() >= usual.stencil_size()
+                        });
+                        let config = ten_bit.unwrap_or(usual).clone();
                         log::debug!(
                             "using the first config from config picker closure. config: {config:?}"
                         );

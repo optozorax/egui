@@ -403,6 +403,22 @@ pub struct NativeOptions {
     /// Defaults to true.
     pub dithering: bool,
 
+    /// Ask for a window framebuffer with 10 bits per color channel (`RGB10_A2`) instead of 8.
+    ///
+    /// Only the `glow` renderer uses it. If the platform offers no such framebuffer
+    /// (no driver support, software rendering, …), the window gets the usual 8-bit one,
+    /// as if this were `false`. When a 10-bit framebuffer is used, [`Self::dithering`] is off:
+    /// its noise is tuned to hide 8-bit steps.
+    ///
+    /// To see what you got, read `GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE` of `GL_BACK_LEFT` on
+    /// the default framebuffer, e.g. with [`crate::CreationContext::gl`].
+    ///
+    /// Whether 10 bits then reach the screen is up to the OS compositor and the display link.
+    ///
+    /// Defaults to false.
+    #[cfg(feature = "glow")]
+    pub prefer_10_bit_color: bool,
+
     /// Should the platform clipboard keyboard shortcuts
     /// (e.g. <kbd>Cmd/Ctrl</kbd>+<kbd>X</kbd>/<kbd>C</kbd>/<kbd>V</kbd>)
     /// be translated into [`egui::Event::Cut`], [`egui::Event::Copy`] and [`egui::Event::Paste`]?
@@ -498,6 +514,9 @@ impl Default for NativeOptions {
             persistence_path: None,
 
             dithering: true,
+
+            #[cfg(feature = "glow")]
+            prefer_10_bit_color: false,
 
             clipboard_shortcuts: true,
 
